@@ -1,0 +1,23 @@
+{
+  "name": "retro-lyrics-sync",
+  "version": "1.0.0",
+  "description": "Syncs Spotify lyrics to an Arduino LCD over USB serial",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node --env-file=.env src/sync.mjs",
+    "login": "node --env-file=.env src/auth.mjs",
+    "serial-test": "node src/serial-test.mjs"
+  },
+  "keywords": [
+    "arduino",
+    "spotify",
+    "lyrics",
+    "lcd",
+    "serialport"
+  ],
+  "author": "Cathy",
+  "license": "ISC",
+  "dependencies": {
+    "serialport": "^13.0.0"
+  }
+}
