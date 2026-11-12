@@ -3,7 +3,6 @@
 A 16x2 LCD that shows **synced lyrics for whatever is playing on Spotify**, built with an Arduino Uno and a small Node.js program. I built this as my first electronics project, starting from zero hardware experience.
 
 ![Demo](docs/images/demo.gif)
-<!-- Add your demo GIF or a photo at docs/images/demo.gif -->
 
 ## How it works
 
@@ -113,6 +112,21 @@ retro-lyrics-display/
 - Added button input (`INPUT_PULLUP`), wired and powered the LCD, and printed "hello"
 - **v1:** timed lyrics with a start button using `millis()` and a state flag
 - **v2:** Uno listener sketch → Node.js serial test → Spotify login (PKCE) → auto-sync with LRCLIB lyrics → page-flipping for long lines
+
+## Build photos
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/unboxing.jpg" alt="ELEGOO starter kit, multimeter, and soldering kit"><br><sub><b>Day 1:</b> starter kit, multimeter, and soldering kit</sub></td>
+    <td width="33%"><img src="docs/images/first-circuit.jpg" alt="Red LED lit on a breadboard, powered by the Uno"><br><sub><b>First circuit:</b> LED + 220 Ω resistor</sub></td>
+    <td width="33%"><img src="docs/images/multimeter.jpg" alt="Multimeter reading 2.002 V across the LED"><br><sub><b>Checking the math:</b> 2.00 V across the LED</sub></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/images/wiring.jpg" alt="LCD lit with a row of boxes after setting contrast"><br><sub><b>LCD powered:</b> the row of boxes means power + contrast work</sub></td>
+    <td width="33%"><img src="docs/images/lcd-hello.jpg" alt="LCD showing hello world"><br><sub><b>First words:</b> LiquidCrystal "hello world"</sub></td>
+    <td width="33%"><img src="docs/images/app-icon.png" alt="Pixel-art desktop icon of a smiling LCD"><br><sub><b>Desktop launcher:</b> custom app icon</sub></td>
+  </tr>
+</table>
 
 ## Problems I hit (and how I fixed them)
 
