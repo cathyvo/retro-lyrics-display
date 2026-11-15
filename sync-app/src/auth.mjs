@@ -16,7 +16,7 @@ import { writeFile } from 'node:fs/promises';
 
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const REDIRECT_URI = 'http://127.0.0.1:8888/callback'; // must match the Spotify dashboard EXACTLY
-const SCOPES = 'user-read-currently-playing user-read-playback-state';
+const SCOPES = 'user-read-currently-playing user-read-playback-state user-modify-playback-state'; // modify = pause/play from the remote's sleep button
 
 if (!CLIENT_ID) {
   console.error('No Client ID found. Check that .env has a line like: SPOTIFY_CLIENT_ID=abc123');

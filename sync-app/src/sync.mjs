@@ -5,9 +5,10 @@
 //  - tokens.json (made by npm run login)
 //  - the Uno running lcd_serial_listener
 //  - the Arduino Serial Monitor CLOSED (only one program can use COM3)
+//  - optional: the IR remote Pico on COM4, with Thonny CLOSED (only one program can use COM4)
 //
 // How it works:
-//  1. Every 2 seconds, ask Spotify: what song, and how many ms into it?
+//  1. Every half second, ask Spotify: what song, and how many ms into it?
 //     We add half the network round trip, because the answer is a bit old when it arrives.
 //  2. When the song changes, fetch its timed lyrics from LRCLIB.
 //     - If the song has real word-by-word timing (LRCLIB "lyricsfile"), use it.
@@ -16,6 +17,9 @@
 //     sung so far on the Uno as "top row|bottom row".
 //  4. Arrow keys nudge the timing live: LEFT = lyrics earlier, RIGHT = lyrics later.
 //     Save your favorite number in .env as LEAD_MS=...
+//  5. IR remote (optional): when you press play/pause on the remote, the Pico tells us
+//     right away, so the LCD pauses instantly instead of waiting for Spotify to notice.
+//     The red power button = sleep mode: screen goes blank + music pauses. Press again to wake.
 
 import { readFile, writeFile } from 'node:fs/promises';
 import readline from 'node:readline';
@@ -31,7 +35,9 @@ try {
 
 // ---------- Settings (tweak these) ----------
 const PORT_PATH = 'COM3';  // your Uno's port
-const POLL_MS = 2000;      // how often we ask Spotify where the song is
+const POLL_MS = 500;       // how often we ask Spotify where the song is
+const PICO_PORT = 'COM4'; // the IR remote Pico's port (not plugged in = lyrics still work, just no instant pause)
+const REMOTE_TRUST_MS = 1500; // after a remote press, trust the remote over Spotify this long (Spotify is slow to catch up)
 const TICK_MS = 50;        // how often we update the LCD (50 = smooth word by word)
 const envLead = Number(process.env.LEAD_MS);
 let leadMs = Number.isFinite(envLead) ? envLead : 250; // bigger = lyrics show earlier. Nudge live with the arrow keys.
@@ -50,6 +56,9 @@ let isPlaying = false;
 let progressAtPoll = 0;    // Spotify's progress_ms at our last check (+ half the network trip)
 let pollTime = 0;          // when that answer arrived (Date.now())
 let pauseUntil = 0;        // if Spotify says "slow down", wait until this time
+let trustRemoteUntil = 0;  // right after a remote press, ignore Spotify until this time
+let sleeping = false;      // sleep mode: screen blank (red power button on the remote)
+let pausedBySleep = false; // did sleep mode pause the music? (then waking up plays it again)
 let lastSent = '';
 let shownKey = '';         // which song + line is on the screen
 let shownCount = 0;        // how many of its words are showing
@@ -137,6 +146,7 @@ async function refreshIfNeeded() {
 
 async function pollSpotify() {
   if (Date.now() < pauseUntil) return;
+  if (Date.now() < trustRemoteUntil) return; // just pressed the remote: Spotify hasn't caught up yet
   await refreshIfNeeded();
 
   const sentAt = Date.now(); // when we asked Spotify
@@ -151,6 +161,8 @@ async function pollSpotify() {
     console.log(`Spotify says slow down. Waiting ${wait}s.`);
     return;
   }
+  // You pressed the remote while this question was on its way: Spotify's answer is already old, skip it
+  if (Date.now() < trustRemoteUntil) return;
   if (res.status === 204) {                       // nothing playing
     isPlaying = false;
     return;
@@ -307,6 +319,7 @@ function currentProgress() {
 }
 
 function updateDisplay() {
+  if (sleeping) return send('', '');      // sleep mode: blank screen
   if (!track) return send('Retro Lyrics', 'Play a song...');
   if (!isPlaying) return send('- Paused -', track.name);
   if (lyricsStatus === 'loading') return send(track.name, track.artist);
@@ -339,6 +352,86 @@ function updateDisplay() {
   send(top, bottom);
 }
 
+// ---------- IR remote (instant pause) ----------
+
+// The Pico prints "REMOTE:PLAY_PAUSE" over USB when you press play/pause on the remote.
+// We flip pause/play on the LCD right away instead of waiting for Spotify to notice.
+function handleRemote(line) {
+  if (line === 'REMOTE:POWER') return toggleSleep();
+  if (line !== 'REMOTE:PLAY_PAUSE' || !track) return;
+  pausedBySleep = false;               // you pressed play/pause yourself, so waking up won't change it
+  if (isPlaying) {
+    progressAtPoll = currentProgress(); // freeze the song position right here
+    isPlaying = false;
+  } else {
+    isPlaying = true;                   // keep going from the frozen position
+  }
+  pollTime = Date.now();
+  trustRemoteUntil = Date.now() + REMOTE_TRUST_MS;
+  console.log(`Remote: ${isPlaying ? 'play' : 'pause'} (instant)`);
+}
+
+// Red power button: sleep (blank screen + pause music) or wake (screen on + play again)
+async function toggleSleep() {
+  sleeping = !sleeping;
+  if (sleeping) {
+    console.log('Remote: sleep (screen off)');
+    pausedBySleep = isPlaying;            // only pause if something is playing
+    if (!pausedBySleep) return;
+    progressAtPoll = currentProgress();   // freeze the song position right here
+    isPlaying = false;
+    pollTime = Date.now();
+    trustRemoteUntil = Date.now() + REMOTE_TRUST_MS;
+    await spotifyPlayer('pause');
+  } else {
+    console.log('Remote: wake (screen on)');
+    if (!pausedBySleep) return;           // music was already paused before sleep: leave it paused
+    pausedBySleep = false;
+    isPlaying = true;                     // keep going from the frozen position
+    pollTime = Date.now();
+    trustRemoteUntil = Date.now() + REMOTE_TRUST_MS;
+    await spotifyPlayer('play');
+  }
+}
+
+// Ask Spotify to pause or play (needs the playback permission from: npm run login)
+async function spotifyPlayer(action) {
+  try {
+    await refreshIfNeeded();
+    const res = await fetch(`https://api.spotify.com/v1/me/player/${action}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    if (!res.ok) {
+      console.log(`Spotify ${action} failed (${res.status}): ${await res.text()}`);
+      if (res.status === 401 || res.status === 403) console.log('-> If it mentions permissions or scope, run: npm run login');
+    }
+  } catch (err) {
+    console.log(`Spotify ${action} failed:`, err.message);
+  }
+}
+
+// Listen to the Pico. If it isn't there, everything else still works.
+function connectPico() {
+  const pico = new SerialPort({ path: PICO_PORT, baudRate: 115200 }, (err) => {
+    if (err) {
+      console.log(`(No remote on ${PICO_PORT}: instant pause is off. Lyrics still work.)`);
+      if (err.message.includes('Access denied')) console.log('-> Close Thonny, then restart this app.');
+      return;
+    }
+    console.log(`Remote connected on ${PICO_PORT}: instant pause is on.`);
+  });
+  let buffer = '';
+  pico.on('data', (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split(/\r?\n/); // the Pico sends one message per line
+    buffer = lines.pop();                // keep any half-finished line for next time
+    for (const line of lines) handleRemote(line.trim());
+  });
+  pico.on('error', (err) => console.log('Remote error:', err.message));
+  pico.on('close', () => console.log('Remote unplugged: instant pause is off.'));
+}
+
 // ---------- Start ----------
 
 async function main() {
@@ -369,6 +462,7 @@ async function main() {
   console.log(`Connected to the Uno on ${PORT_PATH}. Waiting for it to boot...`);
   await new Promise((r) => setTimeout(r, 2000)); // opening the port restarts the Uno
   send('Retro Lyrics', 'Connecting...');
+  connectPico(); // optional IR remote for instant pause
 
   // Ask Spotify every POLL_MS
   const poll = async () => {
